@@ -1,0 +1,679 @@
+---
+title: "Homework 2 STAT 208"
+author: "Kelsey Blackstone"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r, echo = FALSE, results = 'hide', warning=FALSE, error=FALSE, message=FALSE}
+library(forecast)
+library(gridExtra)
+library(tidyr)
+library(ggplot2)
+library(latex2exp)
+library(rprojroot)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(readr)
+library(janitor)
+library(useful)
+library(magrittr)
+library(dygraphs)
+library(xgboost)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(inspectdf)
+library(caret)
+library(ranger)
+library(rstanarm)
+library(LearnBayes)
+library(kableExtra) 
+library(bayesplot)
+library(ggpubr)
+library(extraDistr)
+library(ggridges)
+```
+
+# Question 3
+
+Increases in atmopsheric $CO_{2}$ levels over time is a well-known occurance. In order to better understand the trend and future of $CO_{2}$, we would like to build a model that fits the data we have observed and, additionally, can make predictions for future unobserved years. In this question, we fit two models. The first model accounts for the periodic oscillation observed by plotting the model by including a sinusoidal component, seen by looking at the first 10 years of data. 
+The second model includes a seasonal component in the model to account for seasonal differences between each year.
+```{r, echo=FALSE}
+setwd("~/Documents/STAT 208")
+mloa_carbon <- read.csv("MaunaLoaCO2.csv")
+
+# Define Observations and Times
+# Initialize time (tax) and observation (Y) arrays
+tax=1:120
+tyr=1959+tax/12
+
+# Define the observations by
+Y=matrix(0,120,1)
+for(i in 1:120){
+Y[i]=mloa_carbon[i,5]
+}
+
+Y_M1=matrix(0,720,1)
+for(i in 1:720){
+Y_M1[i]=mloa_carbon[i,5]
+}
+
+#Plot the data
+plot(1:120, Y, type="o", main="Mauna Loa Data", xlab="Index of Observation", ylab="Carbon Dioxide Concentration")
+```
+
+
+### Part (a): Model 1
+
+As we are familiar with the seasonal aspect of the Mauna Loa data set from our in-class assessment, we account for this trend by adding a sine function with a phase shift, $\tau$ and periodic component of 12, for each month of the year. The model is as follows:
+
+$$Y_{t} = \mu + \alpha t + \gamma t^{2} + \tau sin \left (\frac{2\pi(t-\tau)}{12} \right ) + \epsilon_{t}$$
+In order to build our design matrix, we must first make $Y_{t}$ a linear function; the expression, 
+$$\tau \sin \left (\frac{2\pi(t-\tau)}{12} \right )$$ is not linear. We begin by acknowledging that,
+
+$$ sin \left (\frac{2\pi(t-\tau)}{12} \right )= sin \left ( \frac{2\pi t - 2\pi\tau}{12}\right )$$
+$$ = sin \left ( \frac{2\pi t}{12} \right )cos\left(\frac{2\pi\tau}{12}\right) - cos\left( \frac{2\pi t}{12} \right)sin \left ( \frac{2\pi\tau}{12} \right ) $$
+Now let $A = cos\left(\frac{2\pi\tau}{12}\right)$ and $B = sin\left(\frac{2\pi\tau}{12}\right)$. 
+We can now rewrite our model as linear expression:
+
+$$Y_{t} = \mu + \alpha t + \gamma t^{2} + A \hspace{0.04cm} sin \hspace{0.01cm} \left (\frac{2\pi t}{12} \right ) - B\hspace{0.04cm}  cos \left ( \frac{2\pi t}{12} \right) + \epsilon_{t} $$
+We may now begin setting up our model and solving for our parameter estimates, $\hat{\vec{\beta}}$.
+
+$$\begin{bmatrix} Y_{1} \\
+Y_{2}\\ . \\ . \\ . \\ Y_{n}
+\end{bmatrix} = 
+\begin{bmatrix}1 & 1& 1 & sin\left(\frac{2\pi}{12} \right) & -cos\left(\frac{2\pi}{12} \right)\\
+1 & 2 & 4 & sin\left(\frac{4\pi}{12} \right) & -cos\left(\frac{4\pi}{12} \right)\\
+1 & 3 & 9 & sin\left(\frac{6\pi}{12} \right) & -cos\left(\frac{6\pi}{12} \right)\\
+. &.&.&.&.\\
+. &.&.&.&.\\
+. &.&.&.&.\\
+1 & n & n^{2} & sin\left(\frac{2n\pi}{12} \right) & -cos\left(\frac{2n\pi}{12} \right)\\
+\end{bmatrix}
+\begin{bmatrix}
+\mu\\
+\alpha\\
+\gamma\\
+A\\
+B\\
+\end{bmatrix} +
+\begin{bmatrix}
+\epsilon_{1}\\
+\epsilon_{2}\\
+.\\
+.\\
+.\\
+\epsilon_{n}\\
+\end{bmatrix}$$ 
+
+
+```{r}
+
+######################################### PART A #########################################
+
+p1=5
+
+# observations
+obs = mloa_carbon[,5]
+
+# Define the observations by
+Y=matrix(0,120,1)
+for(i in 1:120){
+Y[i]=mloa_carbon[i,5]
+}
+
+################################## Design Matrix #########################################
+
+n <- nrow(mloa_carbon)
+des_mat <- matrix(NA, nrow = 720, ncol = p1)
+for (i in 1:720){
+  des_mat[i, 1] <- 1
+  des_mat[i, 2] <- i
+  des_mat[i, 3] <- i^2
+  des_mat[i, 4] <- sin(2*pi*i/12) # adding seasonal components
+  des_mat[i, 5] <- -cos(2*pi*i/12) # adding seasonal components
+}
+
+estimates1 <- solve((t(des_mat) %*% des_mat)) %*% t(des_mat) %*% 
+              Y_M1
+```
+
+```{r, echo = FALSE}
+# B hat estimate:
+# xtx <- t(des_mat) %*% des_mat
+# xtx_inv <- solve(xtx)
+# xtx_inv_xt <- xtx_inv %*% t(des_mat)
+# estimates_M1 <- xtx_inv_xt %*% Y_M1
+
+estimate <- c("mu", "alpha", "gamma", "A", "B")
+tab <- cbind(estimate, round(estimates1, 5))
+tab %>% kable(caption = "Parameter Estimates", col.names = c("", "estimate")) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"), latex_options = "hold_position")
+```
+
+```{r}
+
+############################## Fitted Line ###########################################
+
+sincos_fit = estimates1[1] + des_mat[,2] * estimates1[2] + 
+  des_mat[,3] * estimates1[3] + des_mat[,4] * estimates1[4] - 
+  des_mat[,5] * estimates1[5]
+
+plot(tax,Y, type="o", main="Mauna Loa Data", xlab="Index of Observation", 
+     ylab="Carbon Dioxide Concentration")
+  lines(sincos_fit, col="red")
+  legend("topleft", 
+    legend = c("Data", "Sinusoidal Fit"), 
+    col = c("black", "red"),
+    lty = c(1,1), lwd=c(2,2))
+
+####################################################################################
+  
+# Compute Estimated Y
+y_hat <- des_mat %*% estimates1
+
+# Compute Residuals
+resids1 = Y_M1 - y_hat
+
+## Sum of Squared Errors
+SSE_M1 = t(resids1) %*% resids1
+
+## MSE - Compute Parameter Standard Errors
+sighat_M1 = SSE_M1/(720 - 3)
+SE_M1 <- matrix(0, 5, 1)
+for(i in 1:5){
+SE_M1[i]=sighat_M1^(1/2)*solve((t(des_mat) %*% des_mat))[i,i]^(1/2)
+}
+
+# standard errors for each estimate
+print(SE_M1)
+SSR_M1 <- sum(resids1^2)
+
+## R^2
+SST <- t(Y_M1 - mean(Y_M1)) %*% (Y_M1 - mean(Y_M1))
+R.squared <- 1 - (SSE_M1/SST)
+
+# tyr=1959:(1959+720/12)-1
+# 
+# Plot Residuals
+plot(1:720, resids1, main="Mauna Loa Residuals: Model 1", xlab="Index of Observation", 
+     ylab="Estimated Carbon Dioxide Concentration")
+  abline(h=0, col = "red")
+
+```
+
+
+```{r}
+
+############################ CHECK USING LM FUNCTION  ####################################
+
+t <- time(mloa_carbon$V3) # index of the y
+t2 <- t^2
+tsin <- sin(2*pi*t/12)
+tcos <- -cos(2*pi*t/12)
+
+test1 <- lm(mloa_carbon$V3 ~ t + t2 + tsin+tcos)
+summary(test1)
+```
+
+### Model 2:
+
+Our next model includes adding seasonal components in order to estimate the $CO_{2}$ levels in Mauna Loa. 
+
+$$Y_{t} = \mu + \alpha t + \gamma t^{2}  + S_{t} + \epsilon_{t}$$
+
+
+$$\begin{bmatrix} Y_{1} \\
+Y_{2}\\ . \\ . \\ . \\ Y_{n}
+\end{bmatrix} =\begin{bmatrix} 1 & 1 & 1 & 1 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0\\
+1 & 2 & 4 & 0 & 1 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0\\
+1 & 3 & 9 & 0 & 0 & 1 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0\\
+. & . & . & . & . & . & . & . & . & . & . & . & . & . \\
+. & . & . & . & . & . & . & . & . & . & . & . & . & . \\
+. & . & . & . & . & . & . & . & . & . & . & . & . & . \\
+1 & 12 & 144 & -1 & -1 & -1 & -1 & -1 & -1 & -1 & -1 & -1 & -1 & -1\\
+1 & 13 & 169 & 1 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0\\
+. & . & . & . & . & . & . & . & . & . & . & . & . & . \\
+. & . & . & . & . & . & . & . & . & . & . & . & . & . \\
+. & . & . & . & . & . & . & . & . & . & . & . & . & . \\
+1 & n & n^{2} & -1 & -1 & -1 & -1 & -1 & -1 & -1 & -1 & -1 & -1 & -1\\
+\end{bmatrix}
+\begin{bmatrix}
+\mu\\
+\alpha\\
+\gamma\\
+S_{1}\\
+S_{2}\\
+S_{3}\\
+S_{4}\\
+S_{5}\\
+S_{6}\\
+S_{7}\\
+S_{8}\\
+S_{9}\\
+S_{10}\\
+S_{11}\\
+\end{bmatrix} +
+\begin{bmatrix}
+\epsilon_{1}\\
+\epsilon_{2}\\
+.\\
+.\\
+.\\
+\epsilon_{n}\\
+\end{bmatrix}$$
+
+
+```{r}
+
+################################# PART B ##################################################
+p2 <- 14
+
+# build design matrix 
+S <- matrix(0, 12, 11)
+diag(S) <- rep(1, 11)
+S[12,] <- rep(-1, 11)
+n <- nrow(mloa_carbon)
+des_mat2 <- matrix(0, 720, p2)
+for (i in 1:720){
+  des_mat2[i,1] <- 1
+  des_mat2[i,2] <- i
+  des_mat2[i,3] <- i^2
+  if (mod(i - 1, 12) == 0){
+    des_mat2[i:(i+11), 4:14] = S
+  }
+}
+colnames(des_mat2) = c("mu", "alpha", "gamma", paste0("S", 1:11))
+
+# B hat estimate:
+estimates2 <- solve((t(des_mat2) %*% des_mat2)) %*% t(des_mat2) %*% Y_M1
+
+```
+
+```{r,echo = FALSE}
+prefix <- "S"
+suffix <- seq(1:11)
+seasons <- paste(prefix, suffix, sep="")
+estimate <- c("mu", "alpha", "gamma", seasons)
+tab <- cbind(estimate, round(estimates2, 4))
+tab %>% kable(caption = "Parameter Estimates",col.names = c("","estimates"), row.names = FALSE) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                latex_options = "hold_position")
+```
+
+```{r, fig.width=10}
+
+############################## Fitted Line ###########################################
+
+seasonal_fit = estimates2[1] + des_mat2[,2] * estimates2[2] + des_mat2[,3] * 
+  estimates2[3] + des_mat2[,4] * estimates2[4] + des_mat2[,5] * estimates2[5] + 
+  des_mat2[,6] * estimates2[6] + des_mat2[,7] * estimates2[7] + des_mat2[,8] * 
+  estimates2[8] + des_mat2[,9] * estimates2[9] + des_mat2[,10] * estimates2[10] + 
+  des_mat2[,11] * estimates2[11]
+
+par(mfrow=c(1,2))
+plot(tax, Y, type="o", main="Mauna Loa Data", xlab="Index of Observation", 
+     ylab="Carbon Dioxide Concentration")
+  lines(seasonal_fit, col="red")
+  legend("topleft", 
+         legend = c("Data", "Seasonal Fit"), 
+         col = c("black", "red"),
+         lty = c(1,1), lwd=c(2,2))
+  
+####################################################################################
+  
+# Compute Estimated Y
+y_hat2 <- des_mat2 %*% estimates2
+y_hat2 %>% glimpse()
+
+# Compute Residuals
+resids2 = Y_M1 - y_hat2
+
+## Sum of Squared Errors
+SSE_M2 = t(resids2) %*% resids2
+
+## MSE - Compute Parameter Standard Errors
+sighat_M2 = SSE_M2/(720 - 3)
+SE_M2 <- matrix(0, 14, 1)
+for(i in 1:14){
+SE_M2[i] = sighat_M2^(1/2)*solve((t(des_mat2) %*% des_mat2))[i,i]^(1/2)
+}
+
+# standard errors for each estimate
+print(SE_M2)
+SSR_M2 <- sum(resids2^2)
+
+## R^2
+SST <- t(Y_M1 - mean(Y_M1)) %*% (Y_M1 - mean(Y_M1))
+R.squared <- 1 - (SSE_M2/SST)
+
+plot(1:720, resids2, main="Mauna Loa Residuals", xlab="Index of Observation", 
+     ylab="Estimated Carbon Dioxide Concentration")
+abline(h=0, col = "red")
+```
+
+```{r}
+# shared my meltem: forcasting/trend analysis 
+time.series = ts(Y_M1, start = c(1959,1),freq = 12)
+par(las=2)
+tsdisplay(time.series, main="CO2 emissions")
+```
+
+# Question 4: F-Test
+
+In Problem 3, run an F-test at level 95% to discern which model is preferred
+
+```{r}
+# Model comparison
+# f-test: ratio of t statistics
+
+# number of parameters in second model - number in first model 
+k <- p2-p1
+
+# testing 
+t.stat <- (SSE_M1 - SSE_M2)/(sighat_M2*k)
+f.stat <- qf(p = .95, df1 = k, df2 = 720 - p2)
+
+```
+
+```{r, echo=FALSE, results='HIDE'}
+# fit1 <- lm(Y_M1 ~ des_mat)
+# fit2 <- lm(Y_M1 ~ des_mat2)
+# a <- anova(fit1, fit2)
+```
+
+*F-test conclusions:*
+From the results of our T statistic and F-test, we see that the T statistic is $44.8449$ and the F-test value is $1.89$. Since the $T_{stat} > F_{test}$, we reject model 1 - our sinusoidal model - in favor of Model 2 - our seasonal component model. I find this interesting considering the results of our residual plots and also the fitted line. On our sinusodial model, the fitted line follows the data fairly well. Additionally, the residuals look a lot more random and independent. While Model 2 is selected rather than Model 1, it is important to remember that this F-test is only valid if the individual model assumptions are satisfied, i.e. the residuals are IID, normally distribution with mean 0 and constant variance. 
+
+
+# Question 7: Global Temperatures
+
+Fit the model,
+$$ Y_{t} = \mu + \alpha t + \gamma t^{2} + \epsilon_{t}$$
+To the global temperature series. 
+
+$$\begin{bmatrix} Y_{1} \\
+Y_{2}\\ . \\ . \\ . \\ Y_{n}
+\end{bmatrix} = 
+\begin{bmatrix}1 & 1& 1 \\
+1 & 2 & 4\\
+1 & 3 & 9 \\
+. &.&.\\
+. &.&.\\
+. &.&.\\
+1 & n & n^{2}\\
+\end{bmatrix}
+\begin{bmatrix}
+\mu\\
+\alpha\\
+\gamma\\
+\end{bmatrix} +
+\begin{bmatrix}
+\epsilon_{1}\\
+\epsilon_{2}\\
+.\\
+.\\
+.\\
+\epsilon_{n}\\
+\end{bmatrix}$$ 
+```{r, echo=FALSE}
+setwd("~/Documents/STAT 208")
+glob.temp <- read.csv("Global_Temperatures.csv")
+```
+```{r}
+head(glob.temp)
+
+N = length(glob.temp$Temperature)
+p = 3
+
+time.init=1879+1:N
+Y=matrix(0,N,1)
+
+# Define the observations by
+for(i in 1:N){
+  Y[i]=glob.temp[i,2]
+}
+
+# Plot the data
+plot(time.init,Y, type="o", main="The Earth's Temperature Record 1880-2018", 
+     xlab="Year of Observation", ylab="Global Temperature (Degrees C)")
+
+# Define Design Matrix
+D = matrix(0,N,p)
+for(i in 1:N){
+  D[i,1]=1
+  D[i,2]=i
+  D[i,3]=i^2
+}
+
+obs = glob.temp[,2]
+
+# B hat estimate:
+H1 = t(D) %*% D
+H2 = solve(H1)
+H3 = H2 %*% t(D)
+estimates = H3 %*% Y
+```
+
+```{r,echo = FALSE}
+
+estimate <- c("mu", "alpha", "gamma")
+tab <- cbind(estimate, estimates)
+tab %>% kable(caption = "Parameter Estimates",col.names = c("","estimates"), 
+              row.names = FALSE) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                latex_options = "hold_position")
+```
+
+```{r}
+########################## model checking using LM function ####################################
+gtemp <- time(glob.temp$Temperature)
+gtemp_sq <- gtemp^2
+fit.quad <- lm(glob.temp$Temperature ~ gtemp + gtemp_sq)
+anova(fit.quad)
+summary(fit.quad)
+par(mfrow = c(1,2))
+plot(fit.quad, which = 1:2)
+
+```
+
+
+
+```{r}
+# Compute Estimated Y
+yhat = D %*% estimates
+
+# Compute Residuals
+Resid = Y - yhat
+
+# Compute Parameter Standard Errors
+se <- matrix(0,p,1)
+# SSE <- t(Resid) %*% Resid
+SSE <- sum((Y - yhat)^2)
+sighat <- SSE/(N - p)
+for(i in 1:p){
+  se[i] <- sighat^(1/2)*H2[i,i]^(1/2)
+}
+
+# Plot data against fit
+par(mfrow=c(1,2))
+plot(time.init, Y, type<-"o", main="Least Squares Fit", 
+     xlab="Year of Observation", ylab="Global Temperature (Degrees C)")
+lines(time.init, yhat)
+
+# Plot Residuals
+plot(time.init, Resid, main="Regression Residuals", 
+     xlab="Year of Observation", ylab="Residual (Degrees C)")
+abline(h=0, col = "red")
+# abline(lm(time.init ~ Y), col = "red")
+
+time.series = ts(Y, start = c(1880,1),freq = 1)
+par(las=2)
+tsdisplay(time.series, main="CO2 emissions")
+```
+
+Next, we would like to test the following hypotheses:
+$$ H_{0}: \gamma = 0\\
+H_{A}: \gamma > 0$$
+
+To test if $\gamma > 0$, we first acknowledge that 
+$$\hat{\vec{\beta}} \sim t_{n-p}(0, \sigma^{2}(x^{T}x)^{-1})$$ 
+$$T = \frac{\hat{\vec{\beta}} - 0}{\sqrt{\sigma^{2}(x^{T}x)^{-1}}} \sim t_{n-p}$$
+$$T_{\gamma} = \frac{\hat{\gamma}}{\sqrt{\sigma^{2}(x^{T}x)^{-1}}} $$
+
+Where $\hat{\gamma} = 8.278459e-05$, $\sigma^2 = 0.0135$ and $(x^{T}x)^{-1} = 3.469852e-09$. Next, we test our hypotheses using a p-value approach for a 95% confidence level and an $\alpha$ level of $\alpha = 0.05$.
+
+```{r}
+a.temp <- matrix(c(0,0,1), ncol = 1)
+t.stat <- t(a.temp) %*% estimates / 
+  (sqrt(sighat)*sqrt(t(a.temp) %*% H2 %*% a.temp))
+# t-stat is 12.07269 
+
+c.val <- qt(0.95, N - p)
+# critical value is 1.656
+
+
+p.val <- pt(q = -abs(t.stat), df = N-p)
+p.val
+# p.val is 1.457091e-23
+
+# checking values against lm() results 
+summary(fit.quad)
+fit.quad$coefficients
+# p.value here is 8.278459e-05
+```
+
+From our results, we see that $p = 1.45 \times 10^{-23}$. Thus, $p < 0.05$ and we reject the null hypothesis, $H_{0}: \gamma = 0$ in favor of the alternative, $H_{A}: \gamma > 0$. In other words, there is significant evidence that there is a quadratic term, in our case, $\gamma^{2}$, in our model.
+
+
+# Question 9: Unethical Kitties
+
+Is the mean number of births between breeders the same? Here, we are testing differences between three different tiger breeders. 
+
+Model:
+
+\begin{align}
+Y_{ij} = \mu_{i} + \epsilon_{ij}
+\end{align}
+
+where $Y_{ij}$ represents the j-th observation on the i-th breeder, i=1:3. Denote the mean number of tiger births for breeder i as $\mu_{i}$. Our hypotheses are the following:
+
+\begin{gather*}
+H_{0}: \mu_{1} = \mu_{2} = \mu_{3}\\
+H_{A}:\text{at least one } \mu_{i} \text{ is different than the rest.} 
+\end{gather*}
+
+<!-- $$ H_{0}: \mu_{1} = \mu_{2} = \mu_{3}$$ -->
+<!-- $$H_{A}:\text{at least one } \mu_{i} \text{ is different than the rest.} $$ -->
+
+
+Model Assumptions:
+In order to use this model for future predictions, we are assuming that data collected from each breeder are independent and randomly sampled. We also must check to see that the residuals are independent and normally distributed with common variance and mean = 0. 
+
+```{r}
+setwd("~/Documents/STAT 208")
+tiger.dat <- read.csv("tigerdat.csv")
+levels(tiger.dat$breeder)
+
+data_summary <- group_by(tiger.dat, breeder) %>%
+  summarise(
+    count = n(),
+    mean = round(mean(number.of.kitties, na.rm = TRUE),3),
+    sd = round(sd(number.of.kitties, na.rm = TRUE),3)
+  )
+
+```
+```{r, echo=FALSE}
+data_summary[,-2] %>% kable(col.names = c("breeder", "mean number of kitties", 
+                    "standard deviation")) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                latex_options = "HOLD_position")
+
+par(mfrow=c(1,2))
+## boxplots
+ggboxplot(tiger.dat, x="breeder", y="number.of.kitties", color = "breeder", palette = c("#00AFBB", "#E7B800", "#FC4E07"), xlab="breeder", ylab = "number of kitties")
+
+## mean plots
+
+ggline(tiger.dat, x="breeder", y = "number.of.kitties",
+       add = c("mean_se"),
+       ylab = "breeder", xlab = "kitties")
+
+# save means and stdevs in variables
+mean_exotic <- mean(tiger.dat$number.of.kitties[tiger.dat$breeder=="exotic"], na.rm = TRUE) 
+sd_exotic <- sd(tiger.dat$number.of.kitties[tiger.dat$breeder=="exotic"], na.rm = TRUE) 
+
+mean_baskin <- mean(tiger.dat$number.of.kitties[tiger.dat$breeder=="baskin"], na.rm = TRUE) 
+sd_baskin <- sd(tiger.dat$number.of.kitties[tiger.dat$breeder=="baskin"], na.rm = TRUE) 
+
+mean_rowe <- mean(tiger.dat$number.of.kitties[tiger.dat$breeder=="rowe"], na.rm = TRUE) 
+sd_rowe <- sd(tiger.dat$number.of.kitties[tiger.dat$breeder=="rowe"], na.rm = TRUE) 
+
+total_mean_kitties <- mean(tiger.dat$number.of.kitties, na.rm =TRUE)
+```
+
+```{r}
+# SST for all breeders 
+SST_exotic <- 7 * (mean_exotic - total_mean_kitties)^2
+SST_baskin <- 4 * (mean_baskin - total_mean_kitties)^2
+SST_rowe <- 6*(mean_rowe - total_mean_kitties)^2
+SST <- SST_exotic + SST_baskin + SST_rowe
+
+# SSE
+SSE_exotic <- (7 - 1) * sd_exotic^2
+SSE_baskin <- (4 - 1) * sd_baskin^2
+SSE_rowe <- (6 - 1) * sd_rowe^2
+SSE <- SSE_exotic + SSE_baskin + SSE_rowe
+
+#degrees of freedom
+df <- 2
+res_df = length(tiger.dat$number.of.kitties) - 3 - 4
+
+
+#Mean squares total
+MST <- SST / df 
+
+#Mean squares error
+MSE <- SSE/res_df
+
+# compute F-statistic from MST and MSE
+f.stat <- MST / MSE
+f.stat 
+
+# calculate p-value
+p.value = 1 - pf(q = f.stat, df1 = df, df2 = res_df)
+p.value 
+
+## anova to check work!
+
+kitty.anova <- aov(number.of.kitties ~ breeder, data = tiger.dat)
+summary(kitty.anova)
+```
+
+
+### Model Validation
+
+In order to validate our ANOVA model, we must check that the residual variables, $\epsilon_{ij}$ are normally distributed with mean 0 and equal variance,
+
+$$\epsilon_{ij} \overset{iid}\sim N(0, \sigma^2)$$
+We check for assumptions on the variance by looking at the residual-vs-fitted plot. From the looks of it, the variance within groups appears to be equally spaced and does not emit any worries of dependence between residuals. Additionally, our Q-Q Plot should display the the theoretical quantiles against standardized residuals against the dotted line. I would argue that the residuals follow the line fairly close, but there is a bit of curvature on the plot for larger residual values. 
+```{r}
+## checking normality of the residuals
+## residuals look approximately normal in QQ plot. 
+## residuals are symmetric 
+
+plot(kitty.anova, which=1:2)
+```
+
+### ANOVA Results & Conclusions
+
+According to our ANOVA table and manual results, the p-value testing whether or not the mean number of kitties is different within breeders is $\sim 0.9179$. Thus, at an $\alpha$ level of $0.05$, we fail to reject our null hypothesis that the differences between the means is the same between breeders, i.e., we do not have significant evidence that the mean number of kitties birthed between breeders is different, and do not reject the null hypothesis:
+
+$$\mu_{1} = \mu_{2} = \mu_{3}.$$
+
